@@ -24,7 +24,7 @@ siteMeasurements_errors <- siteMeasurements %>% #Generate a list of site with so
   mutate(defMeasIsNotChrLgl = map_lgl(map(.$measurementsList, pluck, "DefaultMeasurement"), negate(is.character))) %>% 
   filter(isListNullLgl == TRUE | defMeasIsNotChrLgl == TRUE)
 
-#Code to flag DefaultMeasurement returned as numeric, rather than character, such that data can be nested by site
+# Code to flag DefaultMeasurement returned as numeric, rather than character, such that data can be nested by site
 siteMeasurementsTidy <- siteMeasurements %>% 
   mutate(isListNullLgl = map_lgl(.$measurementsList, is.null)) %>% 
   mutate(defMeasIsNotChrLgl = map_lgl(map(.$measurementsList, pluck, "DefaultMeasurement"), negate(is.character))) %>% 
@@ -34,152 +34,81 @@ siteMeasurementsTidy <- siteMeasurements %>%
 
 ## Which sites contain "Item2"? "Item2" believed to signify presence of metadata. Find and remove to query with Measurement Name on remainder. Filter From != To to remove single data entry values
 siteItem2 <- siteMeasurementsTidy %>% 
-  filter(From != To & DataType == "WQData") %>% 
+  filter(From != To & DataType == "WQData" & RequestAs != "Item2") %>% 
   filter(MeasurementName == "Item2") %>% 
-  # filter(RequestAs != "Item2 [Faecal Coliforms]") %>%
-  select(siteName, RequestAs, From, To) #%>% 
-  # group_by(siteName) %>%
-  # nest
+  select(siteName, RequestAs, From, To) 
 
-# sitesObservations <- sitesItem2 %>% 
-#   filter(siteName == "Are Are Creek at Kaituna Tuamarina Track" | siteName == "Black Birch Stream at Awatere Intake")
-
-# sitesObservations <- sitesItem2 %>% 
-#   filter(siteName == "Are Are Creek at Kaituna Tuamarina Track" | siteName == "Black Birch Stream at Awatere Intake") %>% 
-#   mutate(from = map_chr(map(.$data, pluck, "From"), min)) %>% 
-#   mutate(to = map_chr(map(.$data, pluck, "To"), max)) %>% 
-#   mutate(measurementRequest = map(map(.x = .$data, "RequestAs"), `[`)) %>% 
-#   select(-data)
-
-
-timeStart <- now()
-
+## Following section gets site and measurement info singly from Hilltop (using getHilltopData) - singly as fullGetHilltop does not check for typeof consistency between returned values, therefore collapses when building dataframe.
+timeStart_siteAndMeasurementQuery <- now()
 siteObservations <- siteItem2 %>% 
-  slice(1934:1998) %>% # comment out when done testing
-  mutate(data = pmap(.l = lst(endpoint = endpointMdc, site = siteName, measurement = RequestAs, from = From, to = To), 
-                     .f = getHilltopData))
+  # slice(1934:1998) %>% # 1934:1998 comment out when done testing
+  mutate(return = pmap(.l = lst(endpoint = endpointMdc, site = siteName, measurement = RequestAs, from = From, to = To), 
+                     .f = safely(getHilltopData, otherwise = NA)),
+         data = map(.x = return, "result"),
+         error = map(.x = return, "error"))
+
+timeFinish_siteAndMeasurementQuery <- now()
+timeDiff_siteAndMeasurementQuery <- timeFinish_siteAndMeasurementQuery - timeStart_siteAndMeasurementQuery
+timeDiff_siteAndMeasurementQuery
+
+siteObservations_clean <- siteObservations %>% 
+  mutate(data = map(.x = data, ~ .x %>% arrange(desc(Time)) %>%  modify_at(.at = c("Measurement", "Units"), as.character)))  
   
-test <- siteObservations %>% 
-  # select(data)
-  map(.$data, {~map_at("Measurement", as.character)})
+  # mutate(data = map(.x = data, ~ .x %>% modify_at(.at = "Time", parse_date_time, orders = c("ymdHMS", "ymd"), tz = "NZ")))
+
+   
   
-
-timeFinish <- now()
-
-### This works, don't delete
-# timeStart <- now()
-# sitesObservations <- sitesItem2 %>% 
-#   # slice(1:100) %>%
-#   mutate(reply = map2(.x = siteName, 
-#                       .y = data,
-#                       .f = safely(~fullGetHilltopData(endpoint = endpointMdc,
-#                                                       sites = .x,
-#                                                       measurements = .y$RequestAs,
-#                                                       from = min(.y$From),
-#                                                       to = max(.y$To)),
-#                                   otherwise = NA, 
-#                                   quiet = FALSE)
-#   ))
-# timeFinish <- now()
-
-
-siteObs <- sitesObservations %>% 
-  mutate(errorLgl = map_lgl(map(reply, "result"), negate(is.list))) %>% 
-  mutate(errorMessage = map_chr(map(reply, "message"), pluck))
-                      
-  
-map_dbl(sitesObservations$data[[1]], "RequestAs")
-
-  mutate(test = map2(siteName, map_chr(data, ~map(data, "RequestAs")), ~paste(.x, .y, sep = " ")))
-  
-  mutate(test = map(siteName, as.character))
-  mutate(test = map(data, ~map(data, "RequestAs")))
-  
-  mutate(values = map(.x = siteName, 
-                      # .y = map_chr(data, ~map(data, "RequestAs")),
-                      # .f = ~fullGetHilltopData(endpoint = endpointMdc, sites = .x, measurements = .y)
-                      .f = print
-                      ))
-    
-    
-    RequestAs = map(data, ~map(data, "RequestAs"))) # close, but selection not working correctly
-
-
-sitesObservations_test <- sitesObservations %>%
-  mutate(RequestAs = map(data, ~map(data, "RequestAs"))) # Nearly WORKING!!! :):):)
-  
-  ~map_chr("siteName")
-
- sitesObservations %>% 
-   map(siteName, print)
   
 
-
-map(sitesObservations$data, "RequestAs") # this works
-
-  
-  map_df(.x = map_chr("siteName"), fullGetHilltopData, endpoint = endpointMdc, sites = .x, measurements = map_chr("measurementRequest"), from = map_chr("from"), to = map_chr("to"))
-
+# siteObservations$data[[1]] %>% map(~map("error"))
+#   
+#   mutate(data = map(.x = data, ~ .x %>% modify_at(.at = c("Measurement", "Units"), as.character))) %>% 
+#   mutate(data = map(.x = data, ~ .x %>% modify_at(.at = "Time", parse_date_time, orders = c())))))
 
 
-test <- fullGetHilltopData(endpointMdc, 
-                           site = sitesObservations$siteName, 
-                           measurements = map_chr(sitesObservations$measurementRequest)
-                               
-
-## Which sites contain pH measurements?
-
-
-# Log file generation and recording ---------------------------------------
-
-
-dateToday <- today() %>% {paste0(year(.), str_pad(month(.),width=2, side="left", pad="0"),str_pad(day(.),width=2, side="left", pad="0"))}
-logFilepath <- paste0("output/logWebserverQuery_", dateToday, ".csv")
-
-
-
-for(i in 5:6){
-  measurments <- getHilltopMeasurements(endpointMdc, site=sites[i,1])
-  measurementsFilter <- measurments %>% 
-    filter(MeasurementName != "Item2")
-  
-  if(exists("dataHT")==TRUE){rm(dataHT)}
-  dataHT <- possibly(fullGetHilltopData(endpoint = endpointMdc, 
-                                        sites = sites[i,1], 
-                                        measurements = measurementsFilter$MeasurementName,
-                                        from = min(measurementsFilter$From), 
-                                        to= max(measurementsFilter$To)),
-                     otherwise = NULL)
-  
-  if(is.null(dataHT)==TRUE){
-    writeString <- tibble(siteName=sites[i,1], errorCode=as.integer(1), Message="No dataframe built from Webserver query")
-    write_csv(writeString, logFilepath, append = TRUE)
-  } else {
-    writeString <- tibble(siteName=sites[i,1], errorCode=as.integer(0), Message="All OK")
-    write_csv(writeString, logFilepath, append = TRUE)
+## test the data
+testTimeStamp <- function(data, noOfSec = 10){
+  time <- data$Time
+  errorsLgl <- time %>% interval(lag(.)) %>% int_length() %>% abs < noOfSec
+    # if_else(int_lenth(interval(time, lag(time))) < noOfSec, TRUE, FALSE) 
+  # checkThis <- as.numeric(Time-lag(Time))
+  errorCount <- sum(errorsLgl, na.rm = TRUE)
+  if(errorCount == 0){
+    return(list(errorCount = errorCount, errorText = "No errors"))}
+  else{
+    errorInfo <- which(errorsLgl)
+    errorString <- paste0("Check entries circa ", time[errorInfo])
+    return(list(errorCount = errorCount, errorText = errorString))
   }
-  #do further time checks for duplicates ending in append to log file
-  
 }
 
+## debugging section
+# check <- siteObsErrors %>% 
+#   filter(siteName == "Opawa River at Elizabeth St"  & RequestAs == "Item2 [pH]")
+# testErrors_check <- testTimeStamp(check$data[[1]]) %>% View
+# sum(testErrors, na.rm = TRUE)
 
+siteObservations_errors <- siteObservations_clean %>%
+  mutate(errorList = map(.x = data, testTimeStamp),
+         errorCount = map_dbl(errorList, "errorCount"),
+         errorCode = if_else(errorCount > 0, 1, 0)) %>% 
+  arrange(siteName, RequestAs) %>% 
+  filter(errorCode != 0)
+  
 
-
-
-##
+# Log file generation and recording ---------------------------------------
 # 
-# hilltopDataPath <- "data/SoE_DataWQI_2007-2017.hts"
-# # hilltopDataPath <- "//hydro2/Hilltop/Data/MDC Data.hts"
-# hilltopProjectPath <- "data/General_Project.hpr"
-# collection <- "Data for WQI - all sites"
-# safeStartTime <- "15/3/2013"
-# safeEndTime <- "1"
-# ParameterFiltering <- "Project = SW SoE"
+# logDateStamp <- stamp_date("20181231")
+# logFilepath <- paste0("output/logWebserverQuery_", logDateStamp(today()), ".csv")
 # 
-# siteData_test <- func_queryHilltop(hilltopDataPath, hilltopProjectPath, collection, startTime = safeStartTime, endTime = safeEndTime, projectCodeQuery = ParameterFiltering)
+# writeToFile <- siteObservations_errors %>% 
+#   mutate(errorText = map(errorList, "errorText")) %>% 
+#   select(siteName, RequestAs, From, To, errorText) %>% 
+#   unnest %>% 
+#   arrange(siteName, RequestAs, errorText)
+# 
+# write_csv(writeToFile, logFilepath)
+# # write_csv(siteMeasurementsTidy, "output/siteMeasurementsTidy.csv")
 
-# htObj <- HilltopData(hilltopDataPath)
-# sites <- SiteList(htObj)
-# sitesInfo <- SiteInfo(htObj, sites[1])
-# View(sitesInfo)
-# disconnect(htObj)
+
+
