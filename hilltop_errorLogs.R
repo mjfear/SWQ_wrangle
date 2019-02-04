@@ -2,20 +2,11 @@ library(tidyverse)
 library(lubridate)
 library(hillr)
 
-# library(Hilltop)
-# source("R/func_queryHilltop.R")
-# measurements <- getHilltopMeasurements(endpointMdc, site = sitesWebserver[3,1])
-
-
 endpointMdc <- "http://hydro.marlborough.govt.nz/mdc.hts?"
 sites <- getHilltopSites(endpointMdc)
 
-timeStart_measurementQuery <- now()
 siteMeasurements <- tibble(siteName=sites[,1]) %>%
   mutate(measurementsList = map(.x = siteName, .f = possibly(getHilltopMeasurements, otherwise = NULL), endpoint = endpointMdc)) 
-timeFinish_measurementQuery <- now()
-timeDiff_measurementQuery <- timeFinish_measurementQuery - timeStart_measurementQuery
-
 
 ## Which sites return Nulls from webserver measurements list? Check measurement xml on these
 ## Which sites return mixed types of data for DataMeasurement using this code? Probably neater to define tibble typeOf on import
@@ -39,7 +30,7 @@ siteItem2 <- siteMeasurementsTidy %>%
   select(siteName, RequestAs, From, To) 
 
 ## Following section gets site and measurement info singly from Hilltop (using getHilltopData) - singly as fullGetHilltop does not check for typeof consistency between returned values, therefore collapses when building dataframe.
-timeStart_siteAndMeasurementQuery <- now()
+
 siteObservations <- siteItem2 %>% 
   # slice(1934:1998) %>% # 1934:1998 comment out when done testing
   mutate(return = pmap(.l = lst(endpoint = endpointMdc, site = siteName, measurement = RequestAs, from = From, to = To), 
@@ -47,67 +38,48 @@ siteObservations <- siteItem2 %>%
          data = map(.x = return, "result"),
          error = map(.x = return, "error"))
 
-timeFinish_siteAndMeasurementQuery <- now()
-timeDiff_siteAndMeasurementQuery <- timeFinish_siteAndMeasurementQuery - timeStart_siteAndMeasurementQuery
-timeDiff_siteAndMeasurementQuery
-
 siteObservations_clean <- siteObservations %>% 
-  mutate(data = map(.x = data, ~ .x %>% arrange(desc(Time)) %>%  modify_at(.at = c("Measurement", "Units"), as.character)))  
+  mutate(data = map(.x = data, ~ .x %>% arrange(Time) %>%  modify_at(.at = c("Measurement", "Units"), as.character)))  
   
   # mutate(data = map(.x = data, ~ .x %>% modify_at(.at = "Time", parse_date_time, orders = c("ymdHMS", "ymd"), tz = "NZ")))
-
-   
-  
-  
-
-# siteObservations$data[[1]] %>% map(~map("error"))
-#   
-#   mutate(data = map(.x = data, ~ .x %>% modify_at(.at = c("Measurement", "Units"), as.character))) %>% 
-#   mutate(data = map(.x = data, ~ .x %>% modify_at(.at = "Time", parse_date_time, orders = c())))))
-
 
 ## test the data
 testTimeStamp <- function(data, noOfSec = 10){
   time <- data$Time
-  errorsLgl <- time %>% interval(lag(.)) %>% int_length() %>% abs < noOfSec
-    # if_else(int_lenth(interval(time, lag(time))) < noOfSec, TRUE, FALSE) 
-  # checkThis <- as.numeric(Time-lag(Time))
+  # errorsLgl <- time %>%  interval(lead(time, default = Inf)) %>% int_length() %>% abs < noOfSec
+  errorsLgl <- time %>%  interval(lead(time, default = Inf)) %>% int_length() %>% abs < noOfSec
   errorCount <- sum(errorsLgl, na.rm = TRUE)
   if(errorCount == 0){
     return(list(errorCount = errorCount, errorText = "No errors"))}
   else{
     errorInfo <- which(errorsLgl)
-    errorString <- paste0("Check entries circa ", time[errorInfo])
+    errorString <- paste0("Check entries circa ", time[errorInfo], " and ", time[errorInfo + 1])
     return(list(errorCount = errorCount, errorText = errorString))
   }
 }
 
-## debugging section
-# check <- siteObsErrors %>% 
-#   filter(siteName == "Opawa River at Elizabeth St"  & RequestAs == "Item2 [pH]")
-# testErrors_check <- testTimeStamp(check$data[[1]]) %>% View
-# sum(testErrors, na.rm = TRUE)
-
 siteObservations_errors <- siteObservations_clean %>%
   mutate(errorList = map(.x = data, testTimeStamp),
          errorCount = map_dbl(errorList, "errorCount"),
-         errorCode = if_else(errorCount > 0, 1, 0)) %>% 
-  arrange(siteName, RequestAs) %>% 
+         errorCode = if_else(errorCount > 0, 1, 0),
+         dataLength = map_dbl(.x = data, nrow)) %>% 
+  arrange(desc(errorCount)) %>% 
   filter(errorCode != 0)
   
 
 # Log file generation and recording ---------------------------------------
-# 
-# logDateStamp <- stamp_date("20181231")
-# logFilepath <- paste0("output/logWebserverQuery_", logDateStamp(today()), ".csv")
-# 
-# writeToFile <- siteObservations_errors %>% 
-#   mutate(errorText = map(errorList, "errorText")) %>% 
-#   select(siteName, RequestAs, From, To, errorText) %>% 
-#   unnest %>% 
-#   arrange(siteName, RequestAs, errorText)
-# 
-# write_csv(writeToFile, logFilepath)
+ 
+logDateStamp <- stamp_date("20181231")
+logFilepath <- paste0("output/logWebserverQuery_", logDateStamp(today()), ".csv")
+
+writeToFile <- siteObservations_errors %>%
+  mutate(errorText = map(errorList, "errorText")) %>%
+  select(siteName, RequestAs, errorText) %>%
+  unnest %>%
+  # arrange(siteName, RequestAs, errorText)
+  write_csv(logFilepath)
+
+
 # # write_csv(siteMeasurementsTidy, "output/siteMeasurementsTidy.csv")
 
 
