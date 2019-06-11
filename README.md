@@ -8,3 +8,13 @@ master - contains overarching code, calling subcode blocks as required. Project 
 runMe - contains code that is automatable (for example as an overnight process)
 
 buildGraphs - contains code to build visualisations from wrangled data. Option to save all graphs can be changed in head of master code.
+
+Require following project structure (not captured by github):
+
+SWQ_wrangle -
+  - data
+  - doc
+  - figs
+  - output
+  - R
+  
